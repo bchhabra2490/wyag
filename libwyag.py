@@ -34,18 +34,18 @@ class GitRepository(object):
         if not (force or os.path.isdir(self.gitdir)):
             raise Exception(f"Not a Git repo {path}")
 
-    self.conf = configparser.ConfigParser()
-    cf = repo_file(self, "config")
+        self.conf = configparser.ConfigParser()
+        cf = repo_file(self, "config")
 
-    if cf and os.path.exists(cf):
-        self.conf.read([cf])
-    elif not force:
-        raise Exception("Configuration file missing")
+        if cf and os.path.exists(cf):
+            self.conf.read([cf])
+        elif not force:
+            raise Exception("Configuration file missing")
 
-    if not force:
-        vers = int(self.conf.get("core", "repositoryformatversion"))
-        if vers != 0:
-            raise Exception("Unsupported repositoryformatversion: {vers}")
+        if not force:
+            vers = int(self.conf.get("core", "repositoryformatversion"))
+            if vers != 0:
+                raise Exception("Unsupported repositoryformatversion: {vers}")
 
 
 def repo_path(repo, *path):
@@ -72,6 +72,48 @@ def repo_dir(repo, *path, mkdir=False):
         return path
     else:
         return None
+
+
+def repo_create(path):
+    """Create a new repo at path."""
+
+    repo = GitRepository(path, True)
+
+    if os.path.exists(repo.worktree):
+        if not os.path.isdir(repo.worktree):
+            raise Exception(f"{path} is not a directory")
+        if os.path.exists(repo.gitdir) and os.listdir(repo.gitdir):
+            raise Exception(f"{path} is not empty!")
+    else:
+        os.makedirs(repo.worktree)
+
+    assert repo_dir(repo, "branches", mkdir=True)
+    assert repo_dir(repo, "objects", mkdir=True)
+    assert repo_dir(repo, "refs", "tags", mkdir=True)
+    assert repo_dir(repo, "refs", "heads", mkdir=True)
+
+    with open(repo_file(repo, "description"), "w") as f:
+        f.write("Unnamed repository; edit this file 'description' to name the repository.\n")
+
+    with open(repo_file(repo, "HEAD"), "w") as f:
+        f.write("ref: refs/heads/master\n")
+
+    with open(repo_file(repo, "config"), "w") as f:
+        config = repo_default_config()
+        config.write(f)
+
+    return repo
+
+
+def repo_default_config():
+    ret = configparser.ConfigParser()
+
+    ret.add_section("core")
+    ret.set("core", "repositoryformatversion", "0")
+    ret.set("core", "filemode", "false")
+    ret.set("core", "bare", "false")
+
+    return ret
 
 
 def main(argv=sys.argv[1:]):
