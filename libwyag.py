@@ -19,6 +19,16 @@ argparser = argparse.ArgumentParser(description="The stupidest content tracker")
 argsubparsers = argparser.add_subparsers(title="Commands", dest="command")
 argsubparsers.required = True
 
+argsp = argsubparsers.add_parser("init", help="Initialize a new, empty repository.")
+
+argsp.add_argument(
+    "path",
+    metavar="directory",
+    nargs="?",
+    default=".",
+    help="Where to create the repository.",
+)
+
 
 class GitRepository(object):
     """A git repository"""
@@ -116,10 +126,103 @@ def repo_default_config():
     return ret
 
 
+def repo_find(path=".", required=True):
+    path = os.path.realpath(path)
+
+    if os.path.isdir(os.path.join(path, ".git")):
+        return GitRepository(path)
+
+    parent = os.path.realpath(ps.path.join(path, ".."))
+
+    if parent == path:
+        if required:
+            raise Exception("No git directory")
+        else:
+            return None
+
+    return repo_find(parent, required)
+
+
+class GitObject(object):
+    def __init__(self, data=None):
+        if data != None:
+            self.deserialize(data)
+        else:
+            self.init()
+
+    def serialize(self, repo):
+        raise Exception("Unimplemented!")
+
+    def deserialize(self, repo):
+        raise Exception("Unimplemented!")
+
+    def init(self):
+        pass
+
+
+class GitBlob(GitObject):
+    fmt = b"blob"
+
+    def serialize(self):
+        return self.blobdata
+
+    def deserialize(self, data):
+        return self.blobdata = data
+
+
+def object_read(repo, sha):
+    path = repo_file(repo, "objects", sha[0:2], sha[2:])
+
+    if not os.path.isfile(path):
+        return None
+
+    with open(path, "rb") as f:
+        raw = zlib.decompress(f.read())
+
+        x = raw.find(b" ")  # Space. FIle content type is <Header><Space><Size><Null><Content>
+        fmt = raw[0:x]  # Header Type
+
+        y = raw.find(b"\x00", x)  ## Null character
+
+        size = int(raw[x:y].decode("ascii"))
+
+        if size != len(raw) - y - 1:  ## 1 for null char
+            raise Exception(f"Malformed object {sha}: bad length")
+
+        match fmt:
+            case b"commit":
+                c = GitCommit
+            case b"tree":
+                c = GitTree
+            case b"tag":
+                c = GitTag
+            case b"blob":
+                c = GitBlob
+            case _:
+                raise Exception(f"Unknown type {fmt.decode("ascii")} for object {sha}")
+
+        ## Call constructor with content
+        return c(raw[y + 1 :])
+
+
+def object_write(obj, repo=None):
+    data = obj.serialize()
+
+    result = obj.fmt + b" " + str(len(data)).encode() + b"\x00" + data
+
+    sha = hashlib.sha1(result).hexdigest()
+
+    if repo:
+        path = repo_file(repo, "objects", sha[0:2], sha[2:], mkdir=True)
+
+        if not os.path.exists(path):
+            with open(path, "wb") as f:
+                f.write(zlib.compress(result))
+    return sha
+
+
 def main(argv=sys.argv[1:]):
-    print(argv)
     args = argparser.parse_args(argv)
-    print(args.command)
     match args.command:
         case "add":
             cmd_add(args)
@@ -153,3 +256,7 @@ def main(argv=sys.argv[1:]):
             cmd_tag(args)
         case _:
             print("Bad Command")
+
+
+def cmd_init(args):
+    repo_create(args.path)
