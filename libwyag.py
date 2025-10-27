@@ -58,6 +58,9 @@ argsp.add_argument(
     help="Read object from <file>",
 )
 
+argsp = argsubparsers.add_parser("log", help="Display history of a given commit.")
+argsp.add_argument("commit", default="HEAD", nargs="?", help="Commit to start at.")
+
 
 class GitRepository(object):
     """A git repository"""
@@ -199,6 +202,19 @@ class GitBlob(GitObject):
         self.blobdata = data
 
 
+class GitCommit(GitObject):
+    fmt = b"commit"
+
+    def deserialize(self, data):
+        self.kvlm = kvlm_parse(data)
+
+    def serialize(self):
+        return kvlm_serialize(self.kvlm)
+
+    def init(self):
+        self.kvlm = dict()
+
+
 def object_read(repo, sha):
     path = repo_file(repo, "objects", sha[0:2], sha[2:])
 
@@ -332,3 +348,95 @@ def object_hash(fd, fmt, repo=None):
             raise Exception(f"Unkown type {fmt}!")
 
     return object_write(obj, repo)
+
+
+def kvlm_parse(raw, start=0, dct=None):
+    if not dct:
+        dct = dict()
+
+    spc = raw.find(b" ", start)
+    nl = raw.find(b"\n", start)
+
+    if (spc < 0) or (nl < spc):
+        assert nl == start
+        dct[None] = raw[start + 1 :]
+        return dct
+
+    key = raw[start:spc]
+
+    # Find the end of the value.  Continuation lines begin with a
+    # space, so we loop until we find a "\n" not followed by a space.
+    end = start
+    while True:
+        end = raw.find(b"\n", end + 1)
+        if raw[end + 1] != ord(" "):
+            break
+
+    value = raw[spc + 1 : end].replace(b"\n ", b"\n")
+
+    if key in dct:
+        if type(dct[key]) == list:
+            dct[key].append(value)
+        else:
+            dct[key] = [dct[key], value]
+    else:
+        dct[key] = value
+
+    return kvlm_parse(raw, start=end + 1, dct=dct)
+
+
+def kvlm_serialize(kvlm):
+    ret = b""
+
+    for k in kvlm.keys():
+        if k == None:
+            continue
+        val = kvlm[k]
+
+        if type(val) != list:
+            val = [val]
+        for v in val:
+            ret += k + b" " + (v.replace(b"\n", b"\n ")) + b"\n"
+
+    ret += b"\n" + kvlm[None]
+    return ret
+
+
+def cmd_log(args):
+    repo = repo_find()
+
+    print("digraph wyaglog{")
+
+    print(" node[shape=rect]")
+    log_graphviz(repo, object_find(repo, args.commit), set())
+    print("}")
+
+
+def log_graphviz(repo, sha, seen):
+    if sha in seen:
+        return
+    seen.add(sha)
+
+    commit = object_read(repo, sha)
+    message = commit.kvlm[None].decode("utf8").strip()
+    message = message.replace("\\", "\\\\")
+    message = message.replace('"', '\\"')
+
+    if "\n" in message:  ## Keep only the first line
+        message = message[: message.index("\n")]
+
+    print(f' c_{sha} [label="{sha[0:7]}: {message}"]')
+    assert commit.fmt == b"commit"
+
+    if not b"parent" in commit.kvlm.keys():
+        return
+
+    parents = commit.kvlm[b"parent"]
+
+    if type(parents) != list:
+        parents = [parents]
+
+    for p in parents:
+        p = p.decode("ascii")
+        print(f" c_{sha} -> c_{p};")
+        log_graphviz(repo, p, seen)
