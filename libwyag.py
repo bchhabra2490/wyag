@@ -70,6 +70,10 @@ argsp.add_argument(
 )
 argsp.add_argument("tree", help="A tree-ish object")
 
+argsp = argsubparsers.add_parser("checkout", help="Checkout a commit inside of a directory.")
+argsp.add_argument("commit", help="The commit or tree to checkout.")
+argsp.add_argument("path", help="The EMPTY directory to checkout on")
+
 
 class GitRepository(object):
     """A git repository"""
@@ -553,3 +557,34 @@ def ls_tree(repo, ref, recursive=None, prefix=""):
             )
         else:  # This is a branch
             ls_tree(repo, item.sha, recursive, os.path.join(prefix, item.path))
+
+
+def cmd_checkout(args):
+    repo = repo_find()
+
+    obj = object_read(repo, object_find(repo, args.commit))
+
+    if obj.fmt == b"commit":
+        obj = object_read(repo, obj.kvlm[b"tree"].decode("ascii"))
+
+    if os.path.exists(args.path):
+        if not os.path.isdir(args.path):
+            raise Exception(f"Not a directory {args.path}!")
+        if os.listdir(args.path):
+            raise Exception(f"Not empty {args.path}!")
+    else:
+        os.makedirs(args.path)
+    tree_checkout(repo, obj, os.path.realpath(args.path))
+
+
+def tree_checkout(repo, tree, path):
+    for item in tree.items:
+        obj = object_read(repo, item.sha)
+        dest = os.path.join(path, item.path)
+
+        if obj.fmt == b"tree":
+            os.mkdir(dest)
+            tree_checkout(repo, obj, dest)
+        else:
+            with open(dest, "wb") as f:
+                f.write(obj.blobdata)
