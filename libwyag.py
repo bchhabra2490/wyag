@@ -429,6 +429,40 @@ def object_find(repo, name, fmt=None, follow=True):
     return name
 
 
+def object_resolve(repo, name):
+    candidates = list()
+    hashRE = re.compile(r"^[0-9A-Fa-f]{4,40}$")
+
+    if not name.strip():
+        return None
+
+    if name == "HEAD":
+        return [ref_resolve(repo, "HEAD")]
+
+    if hashRE.match(name):
+        name = name.lower()
+        prefix = name[0:2]
+        path = repo_dir(repo, "objects", prefix, mkdir=False)
+        if path:
+            rem = name[2:]
+            for f in os.listdir(path):
+                if f.startswith(rem):
+                    candidates.append(prefix + f)
+
+    as_tag = ref_resolve(repo, "refs/tags/" + name)
+    if as_tag:
+        candidates.append(as_tag)
+
+    as_branch = ref_resolve(repo, "refs/heads/" + name)
+    if as_branch:
+        candidates.append(as_branch)
+
+    as_remote_branch = ref_resolve(repo, "refs/remotes/" + name)
+    if as_remote_branch:
+        candidates.append(as_remote_branch)
+    return candidates
+
+
 def cmd_hash_object(args):
     if args.write:
         repo = repo_find()
@@ -622,7 +656,7 @@ def ref_resolve(repo, ref):
         return None
 
     with open(path, "r") as f:
-        data = fp.read()[-1]
+        data = fp.read()[:-1]
 
     if data.startswith("ref: "):
         return ref_resolve(repo, data[5:])
