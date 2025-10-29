@@ -95,6 +95,18 @@ argsp.add_argument(
     help="The object the new tag will point to",
 )
 
+argsp = argsubparsers.add_parser("rev-parse", help="Parse revision (or other objects) identifiers")
+argsp.add_argument(
+    "--wyag-type",
+    metavar="type",
+    dest="type",
+    choices=["blob", "commit", "tag", "tree"],
+    default=None,
+    help="Specify the expected type",
+)
+
+argsp.add_argument("name", help="The name to parse")
+
 
 class GitRepository(object):
     """A git repository"""
@@ -425,10 +437,6 @@ def cat_file(repo, obj, fmt=None):
     sys.stdout.buffer.write(obj.serialize())
 
 
-def object_find(repo, name, fmt=None, follow=True):
-    return name
-
-
 def object_resolve(repo, name):
     candidates = list()
     hashRE = re.compile(r"^[0-9A-Fa-f]{4,40}$")
@@ -461,6 +469,37 @@ def object_resolve(repo, name):
     if as_remote_branch:
         candidates.append(as_remote_branch)
     return candidates
+
+
+def object_find(repo, name, fmt=None, follow=True):
+    sha = object_resolve(repo, name)
+
+    if not sha:
+        raise Exception(f"No such reference {name}.")
+
+    if len(sha) > 1:
+        raise Exception(f"Ambiguous reference {name}: Candidates are:\n - {'\n - '.join(sha)}.")
+
+    sha = sha[0]
+
+    if not fmt:
+        return sha
+
+    while True:
+        obj = object_read(repo, sha)
+
+        if obj.fmt == fmt:
+            return sha
+
+        if not follow:
+            return None
+
+        if obj.fmt == b"tag":
+            sha = obj.kvlm[b"object"].decode("ascii")
+        elif obj.fmt == b"commit" and fmt == b"tree":
+            sha = obj.kvlm[b"tree"].decode("ascii")
+        else:
+            return None
 
 
 def cmd_hash_object(args):
@@ -734,3 +773,14 @@ def tag_create(repo, name, ref, create_tag_object=False):
 def ref_create(repo, ref_name, sha):
     with open(repo_file(repo, "refs/" + ref_name), "w") as fp:
         fp.write(sha + "\n")
+
+
+def cmd_rev_parse(args):
+    if args.type:
+        fmt = args.type.encode()
+    else:
+        fmt = None
+
+    repo = repo_find()
+
+    print(object_find(repo, args.name, fmt, follow=True))
