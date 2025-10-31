@@ -111,6 +111,10 @@ argsp = argsubparsers.add_parser("ls-files", help="List all the stage files")
 argsp.add_argument("--verbose", action="store_true", help="Show everything")
 
 
+argsp = argsubparsers("check-ignore", help="Check path(s) against ignore rules")
+argsp.add_argument("path", nargs="+", help="Paths to check")
+
+
 class GitRepository(object):
     """A git repository"""
 
@@ -947,3 +951,34 @@ def cmd_ls_files(args):
             print(f" device: {e.dev}, inode: {e.ino}")
             print(f" user: {pwd.getpwuid(e.uid).pw_name} ({e.uid}) group: {grp.getgrgid(e.gid).gr_name} ({e.gid})")
             print(f" flags: stage={e.flag_stage} assume_valid={e.flag_assume_valid}")
+
+
+def cmd_check_ignore(args):
+    repo = repo_find()
+    rules = gitignore_read(repo)
+    for path in args.path:
+        if check_ignore(rules, path):
+            print(path)
+
+
+def gitignore_parse1(raw):
+    raw = raw.strip()
+
+    if not raw or raw[0] == "#":
+        return None
+    elif raw[0] == "!":
+        return (raw[1:], False)
+    elif raw[0] == "\\":
+        return (raw[1:], True)
+    else:
+        return (raw, True)
+
+
+def gitignore_parse(lines):
+    ret = list()
+    for line in lines:
+        parsed = gitignore_parse1(line)
+        if parsed:
+            ret.append(parsed)
+
+    return ret
