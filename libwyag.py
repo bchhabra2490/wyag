@@ -107,6 +107,9 @@ argsp.add_argument(
 
 argsp.add_argument("name", help="The name to parse")
 
+argsp = argsubparsers.add_parser("ls-files", help="List all the stage files")
+argsp.add_argument("--verbose", action="store_true", help="Show everything")
+
 
 class GitRepository(object):
     """A git repository"""
@@ -350,6 +353,7 @@ def index_read(repo):
     count = btoi(header[8:12])
 
     entries = list()
+    content = raw[12:]
     idx = 0
     for i in range(0, count):
         ctime_s = btoi(content[idx : idx + 4])
@@ -360,7 +364,7 @@ def index_read(repo):
 
         dev = btoi(content[idx + 16 : idx + 20])
 
-        ino = btoi(content[idx + 20, idx + 24])
+        ino = btoi(content[idx + 20 : idx + 24])
 
         unused = btoi(content[idx + 24 : idx + 26])
         assert 0 == unused
@@ -921,3 +925,25 @@ def cmd_rev_parse(args):
     repo = repo_find()
 
     print(object_find(repo, args.name, fmt, follow=True))
+
+
+def cmd_ls_files(args):
+    repo = repo_find()
+    index = index_read(repo)
+
+    if args.verbose:
+        print(f"Index file format v{index.version}, containing {len(index.entries)} entries.")
+
+    for e in index.entries:
+        print(e.name)
+        if args.verbose:
+            entry_type = {0b1000: "regular file", 0b1010: "symlink", 0b1110: "git link"}[e.mode_type]
+
+            print(f" {entry_type} with perms: {e.mode_perms:o}")
+            print(f" on blob: {e.sha}")
+            print(
+                f" created: {datetime.fromtimestamp(e.ctime[0])}.{e.ctime[1]}, modified: {datetime.fromtimestamp(e.mtime[0])}.{e.mtime[1]}"
+            )
+            print(f" device: {e.dev}, inode: {e.ino}")
+            print(f" user: {pwd.getpwuid(e.uid).pw_name} ({e.uid}) group: {grp.getgrgid(e.gid).gr_name} ({e.gid})")
+            print(f" flags: stage={e.flag_stage} assume_valid={e.flag_assume_valid}")
