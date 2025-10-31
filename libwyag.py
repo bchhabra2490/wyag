@@ -111,7 +111,7 @@ argsp = argsubparsers.add_parser("ls-files", help="List all the stage files")
 argsp.add_argument("--verbose", action="store_true", help="Show everything")
 
 
-argsp = argsubparsers("check-ignore", help="Check path(s) against ignore rules")
+argsp = argsubparsers.add_parser("check-ignore", help="Check path(s) against ignore rules")
 argsp.add_argument("path", nargs="+", help="Paths to check")
 
 
@@ -336,6 +336,15 @@ class GitIndex(object):
         self.entries = entries
 
 
+class GitIgnore(object):
+    absolute = None
+    scoped = None
+
+    def __init__(self, absolute, scoped):
+        self.absolute = absolute
+        self.scoped = scoped
+
+
 def btoi(data):
     return int.from_bytes(data, "big")
 
@@ -383,7 +392,7 @@ def index_read(repo):
         gid = btoi(content[idx + 32 : idx + 36])
         fsize = btoi(content[idx + 36 : idx + 40])
 
-        sha = format(btoi(content[idx + 40 : idx + 60]))
+        sha = format(btoi(content[idx + 40 : idx + 60]), "040x")
 
         flags = btoi(content[idx + 60 : idx + 62])
 
@@ -982,3 +991,75 @@ def gitignore_parse(lines):
             ret.append(parsed)
 
     return ret
+
+
+def gitignore_read(repo):
+    ret = GitIgnore(absolute=list(), scoped=dict())
+
+    repo_file = os.path.join(repo.gitdir, "info/exclude")
+    if os.path.exists(repo_file):
+        with open(repo_file, "r") as f:
+            ret.absolute.append(gitignore_parse(f.readlines()))
+
+    if "XDG_CONFIG_HOME" in os.environ:
+        config_home = os.environ["XDG_CONFIG_HOME"]
+    else:
+        config_home = os.path.expanduser("~/.config")
+
+    global_file = os.path.join(config_home, "git/ignore")
+
+    if os.path.exists(global_file):
+        with open(global_file, "r") as f:
+            ret.absolute.append(gitignore_parse(f.readlines()))
+
+    index = index_read(repo)
+
+    for entry in index.entries:
+        if entry.name == ".gitignore" or entry.name.endswith("/.gitignore"):
+            dir_name = os.path.dirname(entry.name)
+            contents = object_read(repo, entry.sha)
+            lines = contents.blobdata.decode("utf8").splitlines()
+            ret.scoped[dir_name] = gitignore_parse(lines)
+
+    return ret
+
+
+def check_ignore1(rules, path):
+    result = None
+    for pattern, value in rules:
+        if fnmatch(path, pattern):
+            result = value
+    return result
+
+
+def check_ignore_scoped(rules, path):
+    parent = os.path.dirname(path)
+    while True:
+        if parent in rules:
+            result = check_ignore1(rules[parent], path)
+            if result != None:
+                return result
+        if parent == "":
+            break
+        parent = os.path.dirname(parent)
+    return None
+
+
+def check_ignore_absolute(rules, path):
+    parent = os.path.dirname(path)
+    for ruleset in rules:
+        result = check_ignore1(ruleset, path)
+        if result != None:
+            return result
+    return False
+
+
+def check_ignore(rules, path):
+    if os.path.isabs(path):
+        raise Exception("This function requires path to be relative to the repo's root")
+
+    result = check_ignore_scoped(rules.scoped, path)
+    if result != None:
+        return result
+
+    return check_ignore_absolute(rules.absolute, path)
