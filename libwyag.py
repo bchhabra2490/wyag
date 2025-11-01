@@ -115,6 +115,9 @@ argsp = argsubparsers.add_parser("check-ignore", help="Check path(s) against ign
 argsp.add_argument("path", nargs="+", help="Paths to check")
 
 
+argsp = argsubparsers.add_parser("status", help="Show the working tree status.")
+
+
 class GitRepository(object):
     """A git repository"""
 
@@ -1063,3 +1066,31 @@ def check_ignore(rules, path):
         return result
 
     return check_ignore_absolute(rules.absolute, path)
+
+
+def cmd_status(_):
+    repo = repo_find()
+    index = index_read(repo)
+
+    cmd_status_branch(repo)
+    cmd_status_head_index(repo, index)
+    print()
+    cmd_status_index_worktree(repo, index)
+
+
+def branch_get_active(repo):
+    with open(repo_file(repo, "HEAD"), "r") as f:
+        head = f.read()
+
+    if head.startswith("ref: refs/heads/"):
+        return head[16:-1]
+    else:
+        return False
+
+
+def cmd_status_branch(repo):
+    branch = branch_get_active(repo)
+    if branch:
+        print(f"On branch {branch}.")
+    else:
+        print(f"Head detached at {object_find(repo, 'HEAD')}")
